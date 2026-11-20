@@ -20,6 +20,13 @@ const SIZES = [["native (no upscale)", "Native"], ["720p", "720p"], ["1080p", "1
 const SHORT = { "native (no upscale)": 0, "720p": 720, "1080p": 1080, "2K (1440p)": 1440, "4K (2160p)": 2160 };
 const STAGES = ["start", "refine", "fps", "upscale", "done"];
 const AUDIO = [["keep the seed's audio", "Keep it as heard"], ["regenerate in the refine", "Make it again in the refine"]];
+// what draws the in-between frames (the Output node's frame_generation, stubelius_ltx_framegen.ENGINES)
+const FRAME_GEN = [["RIFE 4.7", "RIFE 4.7"], ["RIFE 4.9", "RIFE 4.9"], ["RTX Frame Gen HIGH", "RTX High"],
+  ["RTX Frame Gen MEDIUM", "RTX Medium"], ["RTX Frame Gen LOW", "RTX Low"]];
+const frameGenName = (v) => String(v || "").startsWith("RTX") ? "RTX Frame Gen" : "RIFE";
+// RelayVSR (stubelius_ltx_relayvsr.NAMES): the video upscaled as it is, 2x or 4x, before the frame rate
+const RELAY = { "RelayVSR 2x": 2, "RelayVSR 4x": 4 };
+const upscalerLabel = (up) => String(up).startsWith("DLSS") ? "DLSS 5 + Color Lock" : RELAY[up] ? up : "RTX VSR";
 
 class OutputWindow {
   constructor(node) {
@@ -227,7 +234,7 @@ class OutputWindow {
     const out = this.output();
     const st = this.stage?.stage === "done" ? this.stage : this.node.properties?.slx_done;
     v.setSources(fin ? viewUrl(fin) : null, win ? viewUrl(win) : (fin ? viewUrl(fin) : null));
-    const upLabel = String(widgetValue(out, "upscaler", "RTX VSR")).startsWith("DLSS") ? "DLSS 5 + Color Lock" : "RTX VSR";
+    const upLabel = upscalerLabel(String(widgetValue(out, "upscaler", "RTX VSR")));
     v.setLabels(st ? `${SIZES.find((x) => SHORT[x[0]] && SHORT[x[0]] === Math.min(st.width, st.height))?.[1] || `${st.width}×${st.height}`} · ${st.upscaler ? upLabel : "native"}` : "Finished",
       win ? `Render · ${win.width}×${win.height}` : "Render");
     v.setMode(fin && win ? this.mode : "single");
@@ -289,9 +296,12 @@ class OutputWindow {
     const up = String(widgetValue(out, "upscaler", "RTX VSR"));
     const saver = this.saver();
     const st = this.stage;
-    const at = st && STAGES.includes(st.stage) ? STAGES.indexOf(st.stage) : -1;
+    // RelayVSR upscales before the frame rate: its "upscale" stage comes before "fps"
+    const relay = RELAY[up];
+    const order = relay ? ["start", "refine", "upscale", "fps", "done"] : STAGES;
+    const at = st && order.includes(st.stage) ? order.indexOf(st.stage) : -1;
     const running = (name) => st?.stage === name;
-    const passed = (name) => at > STAGES.indexOf(name) || st?.stage === "done";
+    const passed = (name) => at > order.indexOf(name) || st?.stage === "done";
     const win = this.winnerVideo();
     const halfSize = win ? Number(win.scale ?? 1) < 0.999 : this.setupMode() !== "Full size";
     const steps = [];
@@ -301,11 +311,19 @@ class OutputWindow {
       text: halfSize ? `×2 in latent space, ${widgetValue(out, "refine_steps", 4)} steps from ${Number(widgetValue(out, "refine_strength", 0.35)).toFixed(2)}`
         : "Skipped: a full-size seed is finished as rendered",
       state: !halfSize ? "skip" : running("refine") ? "run" : passed("refine") ? "done" : "next" });
+    // RelayVSR: its factor from the winner's size (when known), RTX VSR past it
+    const winShort = win?.width && win?.height ? Math.min(win.width, win.height) : 0;
+    const relayText = !relay ? "" : winShort && SHORT[res] > relay * winShort + 0.5
+      ? `RelayVSR ${relay}x first, then RTX VSR the rest; the video as it is, faces kept`
+      : `RelayVSR ${relay}x first, fitted to ${size}; the video as it is, faces kept`;
     steps.push({ ic: "aspect", name: res === "native (no upscale)" ? "Native size" : `Upscale to ${size}`,
-      text: res === "native (no upscale)" ? "No upscale: the render's own size" : up.startsWith("DLSS") ? "DLSS 5 with Color Lock holds the colours" : "RTX VSR: fast and clean",
+      text: res === "native (no upscale)" ? "No upscale: the render's own size" : up.startsWith("DLSS") ? "DLSS 5 with Color Lock holds the colours"
+        : relay ? relayText : "RTX VSR: fast and clean",
       state: res === "native (no upscale)" ? "skip" : running("upscale") ? "run" : passed("upscale") ? "done" : "next" });
     const smooth = fps > rendered + 0.01;
-    steps.push({ ic: "wave", name: smooth ? `Smooth to ${fps} fps` : `${fps} fps`, text: smooth ? "RIFE draws the frames in between, length and sync kept" : "Frames as rendered",
+    const drawer = String(widgetValue(out, "frame_generation", "RIFE 4.7"));
+    steps.push({ ic: "wave", name: smooth ? `Smooth to ${fps} fps` : `${fps} fps`,
+      text: smooth ? `${FRAME_GEN.find((x) => x[0] === drawer)?.[1] || frameGenName(drawer)} draws the frames in between, length and sync kept` : "Frames as rendered",
       state: smooth ? (running("fps") ? "run" : passed("fps") ? "done" : "next") : st?.stage === "done" ? "done" : "skip" });
     const fmt = String(widgetValue(saver, "format", "video/h264-mp4"));
     const crf = widgetValue(saver, "crf", null);
@@ -357,6 +375,8 @@ class OutputWindow {
       seg(SIZES.filter(([v]) => offered.includes(v)), w("final_resolution")?.value, (v) => set("final_resolution", v))));
     // the Director's rate (the node's 0) up to 120: above it RIFE draws the frames in between, length and sync kept
     const fpsW = w("final_fps");
+    const fgW = w("frame_generation");          // optional input: an Output node from before 2.2 has none (RIFE 4.7)
+    const fg = String(fgW?.value || "RIFE 4.7");
     const rendered = Math.round(this.renderFps() * 100) / 100;
     const hi = Number.isFinite(fpsW?.options?.max) ? fpsW.options.max : 120;
     const fps = Math.round(this.finalFps() * 100) / 100;
@@ -364,7 +384,7 @@ class OutputWindow {
     const fpsHint = h("span.slx-muted.o-fps-hint");
     const showFps = (v) => {
       fpsVal.textContent = `${Math.round(v * 100) / 100} fps`;
-      fpsHint.textContent = v > rendered + 0.01 ? "RIFE draws the frames in between" : "untouched, as rendered";
+      fpsHint.textContent = v > rendered + 0.01 ? `${frameGenName(fg)} draws the frames in between` : "untouched, as rendered";
     };
     showFps(fps);
     const setFps = (v) => set("final_fps", v > rendered + 0.01 ? Math.round(v) : 0);
@@ -374,13 +394,35 @@ class OutputWindow {
       slider({ min: Math.floor(rendered), max: hi, step: 1, value: fps, title: "Frame rate of the finished video", onInput: showFps,
         onChange: (v) => setFps(v) }),
       h("div.o-fps-foot", fpsHint, picks)));
+    if (fgW) {
+      panel.appendChild(h("div.o-sec", label("Frame generation"),
+        seg(FRAME_GEN.filter(([v]) => (fgW.options?.values || [v]).includes(v)), fg, (v) => set("frame_generation", v)),
+        h("div.slx-muted.o-fg-hint", fg.startsWith("RTX")
+          ? "NVIDIA's RTX Frame Generation, RTX 40 series and newer (RIFE where it can't run). Medium for most shots, High for fast movement, Low = fastest"
+          : "Runs on any GPU. RIFE 4.9 is downloaded the first time it's used")));
+    }
     const up = String(w("upscaler")?.value || "RTX VSR");
     const card = (value, name, ic, text) => h("button.o-card", { type: "button", class: up === value ? "on" : null,
       onclick: () => set("upscaler", value) }, h("div.o-card-h", icon(ic, 16), h("b", name)), h("div.slx-muted", text));
     const dlss = !!window.LiteGraph?.registered_node_types?.DLSS5EnhanceImages;
+    const relayNodes = !!window.LiteGraph?.registered_node_types?.RelayVSRConditioning;
+    const offers = w("upscaler")?.options?.values || [];
     panel.appendChild(h("div.o-sec", label("Upscaler"), h("div.o-cards",
       card("DLSS5 + Color Lock", "DLSS 5 + Color Lock", "sparkles", dlss ? "Far more detail; Color Lock keeps the colours the render had" : "Needs ComfyUI-DLSS5-Enhancer"),
-      card("RTX VSR", "RTX VSR", "bolt", "Fast and clean, a little softer"))));
+      card("RTX VSR", "RTX VSR", "bolt", "Fast and clean, a little softer"),
+      offers.includes("RelayVSR 2x") ? card("RelayVSR 2x", "RelayVSR 2x", "layers", relayNodes
+        ? "Sharper in seconds, the video as it is (faces kept)" : "Needs ComfyUI 0.45+ (its RelayVSR nodes)") : null,
+      offers.includes("RelayVSR 4x") ? card("RelayVSR 4x", "RelayVSR 4x", "layers", relayNodes
+        ? "More detail than 2x, about 3x the time and much more VRAM" : "Needs ComfyUI 0.45+ (its RelayVSR nodes)") : null)));
+    // RelayVSR's detail (an optional input, so Output nodes from before 2.2 simply don't show it)
+    if (RELAY[up] && w("relayvsr_detail")) {
+      const dv = Number(w("relayvsr_detail").value ?? 1);
+      const dVal = h("b", dv.toFixed(2));
+      panel.appendChild(h("div.o-polish-ed",
+        h("div.o-row", h("span.slx-muted", "Detail"), slider({ min: 0, max: 1, step: 0.05, value: dv, title: "How much of RelayVSR's added detail is kept",
+          onInput: (v) => { dVal.textContent = Number(v).toFixed(2); }, onChange: (v) => set("relayvsr_detail", v) }), dVal),
+        h("div.slx-muted.o-fg-hint", `Needs its model and decoder (${RELAY[up]}x) from Comfy-Org/RelayVSR. 1 = all of its detail; lower keeps faces closer to the render`)));
+    }
     // the Director's Render holds after the seeds; with one seed it can go straight on to the finish
     panel.appendChild(h("div.o-sec", label("After a render with one seed"),
       seg([[false, "Wait for my pick"], [true, "Finish it right away"]], !!this.node.properties?.slx_autofinish, (v) => {
@@ -592,6 +634,7 @@ class OutputWindow {
     f.append(h("span.slx-fi", icon("folder", 14), "Saves to ", h("b", `output/${sub}`)),
       h("span.slx-fi", icon("cpu", 14), "DLSS 5 ", h("b", types.DLSS5EnhanceImages ? "ready" : "not installed")),
       h("span.slx-fi", icon("cpu", 14), "RTX VSR ", h("b", types.RTXVideoSuperResolution ? "ready" : "not installed")),
+      h("span.slx-fi", icon("cpu", 14), "RelayVSR ", h("b", types.RelayVSRConditioning ? "nodes built in" : "needs ComfyUI 0.45+")),
       h("div.slx-spacer"),
       h("span.slx-fi", icon("refresh", 14), "Change a setting here and only the finish runs again"));
   }
@@ -731,6 +774,7 @@ function injectOutputStyles() {
 .slx-o .o-fps-val{font-family:var(--fh);font-weight:600;font-size:15px}
 .slx-o .o-fps-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .slx-o .o-fps-hint{font-size:12px}
+.slx-o .o-fg-hint{font-size:12px;margin-top:6px}
 .slx-o .o-fps-picks{display:flex;gap:4px}
 .slx-o .o-fps-pick{min-width:38px;height:26px;padding:0 8px;border-radius:8px;border:1px solid var(--stroke);background:var(--glass);
   color:var(--text2);font-family:var(--fh);font-size:12px}

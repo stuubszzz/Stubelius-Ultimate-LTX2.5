@@ -1077,7 +1077,7 @@ export class DirectorWindow {
     const up = widgetValue(output, "upscaler", "RTX VSR");
     const size = SIZE_LABEL[res] || res;
     const parts = [size, `${Math.round(fps * 100) / 100} fps`];
-    if (size !== "Native") parts.push(String(up).startsWith("DLSS5") ? "DLSS 5" : "RTX VSR");
+    if (size !== "Native") parts.push(String(up).startsWith("DLSS5") ? "DLSS 5" : String(up).startsWith("RelayVSR") ? up : "RTX VSR");
     return parts.join(" · ");
   }
 

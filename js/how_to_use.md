@@ -29,8 +29,9 @@ All the seeds side by side, in sync. **Solo** a seed's sound, **A/B split**, **F
 ## 4 · OUTPUT — what comes out
 - The winner against the finished video: drag the divider, **Loupe** for the detail; the finish step by step.
 - **Final size** — native (the Director's size) or 720p–4K; the short side lands exactly on the number, portrait too. 4K holds ≈100 MB of RAM per frame: keep 4K clips short, especially at 48–60 fps.
-- **Frame rate** — the rendered rate (untouched) up to 120; above it RIFE draws the frames in between, length and sync kept.
-- **Upscaler** — RTX VSR, or DLSS5 + Color Lock (more detail, original colours).
+- **Frame rate** — the rendered rate (untouched) up to 120; above it the frame generation draws the frames in between, length and sync kept.
+- **Frame generation** — RIFE 4.7 or 4.9 (any GPU), or RTX Frame Gen High, Medium or Low (RTX 40 series and newer; RIFE where it can't run). Medium for most shots, High for fast movement, Low the fastest.
+- **Upscaler** — RTX VSR, DLSS5 + Color Lock (more detail, original colours), or RelayVSR 2x / 4x (the video as it is, faces kept; needs its model and decoder from Comfy-Org/RelayVSR). RelayVSR runs before the frame rate, RTX VSR past its factor; **Detail** sets how much of its added detail is kept.
 - **Refine** — Draft and Low VRAM only: strength, steps and sampler of the full-size refine. 0.3–0.45 keeps the seed's look. **MSR in the refine** — with Licon MSR: the LoRA's strength there and how hard the references pull (about 0.4 keeps the detail without the references repainting the opening).
 - **Sound of the winner** — keep it as you heard it, or let the refine make it again.
 - **After a render with one seed** — wait for your pick, or finish it right away.

@@ -15,9 +15,10 @@ Output  decides what comes OUT: how far the full-size refine may move the winner
 Seeds   renders 1-4 full seeds with sound at the first-pass scale (the guides are built once) and
         hands them to Finish as one bundle (takes).
 Finish  turns the WINNER into the final video: as rendered when the seeds are full size, else a latent
-        upscale and refine to full size (the seed's audio locked); then RIFE to the final frame rate
-        and RTX VSR or DLSS5 + Color Lock to the final resolution. The refine is memoised, so frame
-        rate / upscaler changes don't repeat it.
+        upscale and refine to full size (the seed's audio locked); then RIFE 4.7 / 4.9 or RTX Frame
+        Generation to the final frame rate and RTX VSR or DLSS5 + Color Lock to the final resolution
+        (RelayVSR 2x / 4x instead upscales before the frame rate, RTX VSR past its factor). The refine
+        is memoised, so frame rate / upscaler changes don't repeat it.
 Speed/memory patches, the live preview and the RTX VSR / DLSS5 / GGUF nodes are called by class
 name at runtime and skipped (or reported clearly) when their pack isn't installed.
 """
@@ -35,6 +36,8 @@ import folder_paths
 import torch
 
 from .stubelius_ltx import _decode, _free_vram, _guide, _holds_run_models, _sample_av, _unwrap, call_node
+from .stubelius_ltx_framegen import DEFAULT as FRAME_DEFAULT, ENGINES as FRAME_ENGINES, NEW_DEFAULT as FRAME_NEW, rife_ckpt
+from .stubelius_ltx_relayvsr import DETAIL as RELAY_DETAIL, NAMES as RELAY
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +45,8 @@ SEED_STEP = 1000003     # seed k = seed + (k - 1) * SEED_STEP, as the old Seed H
 # The official LTX 2.5 first pass: euler_ancestral; linear_quadratic at 8 steps gives exactly its
 # distilled sigmas (1.0 ... 0.975, 0.909, 0.725, 0.422, 0). Used when the Seed Samplers box is bypassed.
 DEFAULT_SAMPLER, DEFAULT_SCHEDULER = "euler_ancestral", "linear_quadratic"
-UPSCALERS = ["RTX VSR", "DLSS5 + Color Lock"]
+# RELAY: RelayVSR 2x / 4x (stubelius_ltx_relayvsr.py), on the end so the saved values keep their places
+UPSCALERS = ["RTX VSR", "DLSS5 + Color Lock", *RELAY]
 AUDIO_MODES = ["keep the seed's audio", "regenerate in the refine"]
 DLSS5_FACTORS = {1.5: "1.5x (Quality)", 1.724: "1.724x (Balanced)", 2.0: "2x (Performance)",
                  3.0: "3x (Ultra Performance)"}
@@ -461,12 +465,30 @@ class StubeliusLTXOutput:
                     "Short side of the final video (portrait too). native = the Director's size after the refine. "
                     "4K holds about 100 MB of RAM per frame, so keep 4K clips short, especially at 48/60 fps."}),
                 "final_fps": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 120.0, "step": 1.0, "tooltip":
-                    "0 = the Director's frame rate, untouched. Higher (48, 50, 60) = RIFE draws the in-between "
-                    "frames; length and sync kept."}),
+                    "0 = the Director's frame rate, untouched. Higher (48, 50, 60) = the frame generation draws the "
+                    "in-between frames (RIFE or RTX Frame Gen); length and sync kept."}),
                 "upscaler": (UPSCALERS, {"default": "RTX VSR", "tooltip":
                     "Used when the final resolution needs an upscale. DLSS5 adds far more detail; Color Lock "
-                    "then restores the original colours. Needs ComfyUI-DLSS5-Enhancer."}),
-            }
+                    "then restores the original colours. Needs ComfyUI-DLSS5-Enhancer. RelayVSR 2x / 4x upscales "
+                    "the video as it is (its faces, motion and sound) in seconds: one model step on every 15th "
+                    "frame, a small decoder for the rest, before the frame rate. Needs its model and decoder from "
+                    "huggingface.co/Comfy-Org/RelayVSR and ComfyUI 0.45+. 2x takes a 704p render to 1408p (1080p "
+                    "is fitted from it); 4x adds more detail and needs much more VRAM (about 22 GB measured from "
+                    "768p). Past its factor, RTX VSR does the rest."}),
+            },
+            # optional, last: a prompt from before 2.2 runs as it did (RIFE 4.7, RelayVSR's full detail); in the UI
+            # a workflow from before 2.2 gets the defaults below (RTX Medium)
+            "optional": {
+                "relayvsr_detail": ("FLOAT", {"default": RELAY_DETAIL, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "RelayVSR only: how much of the detail its decoder adds on top of a plain enlargement "
+                    "is kept. 1 = all of it (ComfyUI's template). Lower keeps faces closer to the render for less "
+                    "new detail."}),
+                "frame_generation": (FRAME_ENGINES, {"default": FRAME_NEW, "tooltip":
+                    "What draws the in-between frames for a frame rate above the Director's: RIFE 4.7 or RIFE 4.9 "
+                    "(any GPU; 4.9 is downloaded on first use), or NVIDIA's RTX Frame Generation (the VFX SDK effect "
+                    "in nvidia-vfx, as RTX VSR; RTX 40 series and newer). MEDIUM for most shots, HIGH for fast "
+                    "movement, LOW the fastest. Where RTX can't run, RIFE draws them."}),
+            },
         }
 
     RETURN_TYPES = ("LTX_OUTPUT",)
@@ -475,11 +497,12 @@ class StubeliusLTXOutput:
     CATEGORY = "StubeliusLTX"
 
     def run(self, refine_strength, refine_steps, refine_sampler, refine_msr_lora_strength, refine_msr_reference,
-            audio, final_resolution, final_fps, upscaler):
+            audio, final_resolution, final_fps, upscaler, relayvsr_detail=RELAY_DETAIL, frame_generation=FRAME_DEFAULT):
         o = dict(strength=float(refine_strength), steps=int(refine_steps), sampler=refine_sampler,
                  msr_lora_strength=float(refine_msr_lora_strength), msr_reference=float(refine_msr_reference),
                  audio_lock=(audio == AUDIO_MODES[0]), resolution=final_resolution, fps=float(final_fps),
-                 upscaler=upscaler)
+                 upscaler=upscaler, relay_detail=max(0.0, min(1.0, float(relayvsr_detail))),
+                 frame_gen=frame_generation if frame_generation in FRAME_ENGINES else FRAME_DEFAULT)
         log.info("[StubeliusLTXOutput] %s", o)
         return (o,)
 
@@ -579,14 +602,14 @@ def _target_size(images, short_side):
     return max(8, round(w * k / 8) * 8), max(8, round(h * k / 8) * 8)
 
 
-def _fit(images, short_side, inplace=False, batch=8):
-    """Bring an IMAGE batch to _target_size; no-op when it already fits. A frame at most 2% too
-    big (DLSS5 gives 1920x1088 for 1080p) is centre-cropped rather than resampled; otherwise
-    bicubic, antialiased. inplace=True (a private tensor only, e.g. Finish's own DLSS5 output)
-    writes a smaller result back into the same memory, so no second full-size copy is made:
-    frame i lands at or before where frame i was, never over a frame not yet read."""
+def _fit(images, short_side, inplace=False, batch=8, size=None):
+    """Bring an IMAGE batch to _target_size (or to `size`, (width, height)); no-op when it already
+    fits. A frame at most 2% too big (DLSS5 gives 1920x1088 for 1080p) is centre-cropped rather than
+    resampled; otherwise bicubic, antialiased. inplace=True (a private tensor only, e.g. Finish's own
+    DLSS5 output) writes a smaller result back into the same memory, so no second full-size copy is
+    made: frame i lands at or before where frame i was, never over a frame not yet read."""
     n, h, w, c = images.shape
-    width, height = _target_size(images, short_side)
+    width, height = size or _target_size(images, short_side)
     if (w, h) == (width, height):
         return images
     shrink = width <= w and height <= h
@@ -716,30 +739,44 @@ class StubeliusLTXFinish:
         if target and _short(images) > target:
             images = _fit(images, target)   # smaller than the render: downscale before RIFE (less work)
 
+        # RelayVSR goes before the frame rate: it reads the render's own frames (every 15th through its model),
+        # and the frame generation then draws at the bigger size
+        engine = o.get("frame_gen", FRAME_DEFAULT)
+        relaying = bool(o["upscaler"] in RELAY and target and target / _short(images) > 1.02)
+        if relaying:
+            finish_stage(unique_id, "upscale", relay=True)
+            from .stubelius_ltx_relayvsr import upscale as relay_upscale
+            images = relay_upscale(images, target, RELAY[o["upscaler"]], o.get("relay_detail", RELAY_DETAIL))
+
         fps = source_fps
         if o["fps"] > source_fps + 1e-6:
-            finish_stage(unique_id, "fps")
+            finish_stage(unique_id, "fps", engine=engine)
             from .stubelius_rife_fps import StubeliusLTXRIFEToFPS
-            images, fps = StubeliusLTXRIFEToFPS().run(images, source_fps, o["fps"], "rife47.pth", True, True, 8)
+            images, fps = StubeliusLTXRIFEToFPS().run(images, source_fps, o["fps"], rife_ckpt(engine), True, True, 8,
+                                                      frame_generation=engine)
 
         upscaled = bool(target and target / _short(images) > 1.02)
         if upscaled:
             finish_stage(unique_id, "upscale")
-            images = self._upscale(images, target, o["upscaler"])
+            # past RelayVSR's factor (e.g. 2x from 704p to 4K) RTX VSR takes it the rest of the way
+            images = self._upscale(images, target, "RTX VSR" if relaying else o["upscaler"])
         if target:
             images = _fit(images, target)   # exact size (DLSS5 only scales by fixed factors)
+        used = ((o["upscaler"] + (" + RTX VSR" if upscaled else "")) if relaying
+                else o["upscaler"] if upscaled else "none")
         sampler, scheduler = takes.get("samplers", [("?", "?")] * w)[w - 1]
         refine = "as rendered" if full_size else f"refine {o['strength']:.2f} x{o['steps']}"
-        log.info("[StubeliusLTXFinish] winner %d (seed %d, %s/%s), %s, %s -> %dx%d @ %.3g fps, upscaler %s",
+        log.info("[StubeliusLTXFinish] winner %d (seed %d, %s/%s), %s, %s -> %dx%d @ %.3g fps, upscaler %s%s",
                  w, takes["seeds"][w - 1], sampler, scheduler, refine, o["resolution"], images.shape[2],
-                 images.shape[1], fps, o["upscaler"] if upscaled else "none")
+                 images.shape[1], fps, used, f", frames by {engine}" if fps > source_fps + 1e-6 else "")
         note = f"Finished seed {w}: {images.shape[2]}x{images.shape[1]}, {fps:.3g} fps."
         if w != winner:
             note += f"\nWINNER {winner}, but only {n} seed{'s' if n > 1 else ''} rendered."
         wave = (audio or {}).get("waveform")
         finish_stage(unique_id, "done", winner=w, width=int(images.shape[2]), height=int(images.shape[1]), fps=float(fps),
                      frames=int(images.shape[0]), seconds=round(int(images.shape[0]) / float(fps), 3),
-                     upscaler=o["upscaler"] if upscaled else None, refined=not full_size,
+                     upscaler=o["upscaler"] if upscaled or relaying else None, refined=not full_size, relayed=relaying,
+                     engine=engine if fps > source_fps + 1e-6 else None,
                      rate=int((audio or {}).get("sample_rate") or 0),
                      channels=int(wave.shape[1]) if torch.is_tensor(wave) and wave.dim() == 3 else 1)
         return {"ui": {"stubelius_note": [note]}, "result": (images, audio, float(fps))}
