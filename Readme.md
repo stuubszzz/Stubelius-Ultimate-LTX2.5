@@ -28,8 +28,8 @@ Two more finish choices in **Output**, from Stubelius Ultimate H3:
 
 - **Frame generation**: what draws the in-between frames for a frame rate above the Director's. **RIFE 4.7** (as
   before), **RIFE 4.9**, or NVIDIA's **RTX Frame Generation** at High, Medium or Low (RTX 40 series and newer;
-  RIFE where it can't run). A new Output node starts on RTX Medium: Medium for most shots, High for fast movement,
-  Low the fastest. A workflow saved before 2.2 keeps RIFE 4.7.
+  RIFE where it can't run). The Output node starts on RTX Medium, also in a workflow saved before 2.2: Medium for
+  most shots, High for fast movement, Low the fastest. Pick RIFE 4.7 for the frames as 2.1 drew them.
 - **RelayVSR 2x and 4x upscalers**: the video upscaled as it is (its faces, motion and sound) in seconds, before
   the frame rate, with a **Detail** slider. 2x takes a 704p render to 1408p: 1080p is fitted from it, and for 2K
   or 4K RTX VSR does the rest. They need ComfyUI 0.45+ and the model and decoder from

@@ -476,7 +476,8 @@ class StubeliusLTXOutput:
                     "is fitted from it); 4x adds more detail and needs much more VRAM (about 22 GB measured from "
                     "768p). Past its factor, RTX VSR does the rest."}),
             },
-            # optional, last: a workflow saved before 2.2 still runs (RelayVSR's full detail, RIFE 4.7)
+            # optional, last: a prompt from before 2.2 runs as it did (RIFE 4.7, RelayVSR's full detail); in the UI
+            # a workflow from before 2.2 gets the defaults below (RTX Medium)
             "optional": {
                 "relayvsr_detail": ("FLOAT", {"default": RELAY_DETAIL, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "RelayVSR only: how much of the detail its decoder adds on top of a plain enlargement "
