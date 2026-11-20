@@ -22,6 +22,19 @@ Install steps, settings and RTX 5090 render times: [the Stubelius Ultimate LTX 2
 see it full size.</em>
 </div>
 
+## What's new in 2.2
+
+Two more finish choices in **Output**, from Stubelius Ultimate H3:
+
+- **Frame generation**: what draws the in-between frames for a frame rate above the Director's. **RIFE 4.7** (as
+  before), **RIFE 4.9**, or NVIDIA's **RTX Frame Generation** at High, Medium or Low (RTX 40 series and newer;
+  RIFE where it can't run). A new Output node starts on RTX Medium: Medium for most shots, High for fast movement,
+  Low the fastest. A workflow saved before 2.2 keeps RIFE 4.7.
+- **RelayVSR 2x and 4x upscalers**: the video upscaled as it is (its faces, motion and sound) in seconds, before
+  the frame rate, with a **Detail** slider. 2x takes a 704p render to 1408p: 1080p is fitted from it, and for 2K
+  or 4K RTX VSR does the rest. They need ComfyUI 0.45+ and the model and decoder from
+  [Comfy-Org/RelayVSR](https://huggingface.co/Comfy-Org/RelayVSR) (see Models below).
+
 ## What's new in 2.1
 
 - **Four windows**: Setup, Director, Seeds and Output, six looks, a step bar on top of every window and a **How to
@@ -53,7 +66,7 @@ windows edit sit behind them; move a window to reach one.
 | **Setup** | **Stubelius LTX Setup**, **Seed Samplers**, **Models**, **Theme** | How the seeds are rendered (Full size, Draft or Low VRAM), 1–4 seeds, a sampler per seed, the checkpoint (safetensors or GGUF), distill / IC / MSR / global LoRAs, text encoder, VAEs, latent upscaler, attention, memory options, live preview, the colour theme |
 | **Director** | **LTX Director CS (2.5)** | The timeline: segments with prompts, pictures and clips, keyframes, motion clips (IC-LoRA), audio, references (Licon MSR), size, length, frame rate |
 | **Seeds** | **Stubelius LTX Seed Previews** | Every seed side by side, in sync, with its sound; pick the winner |
-| **Output** | **Stubelius LTX Finish**, **Output** | The finish of the winner: refine (half-size seeds only), final resolution (native up to 4K), final fps through RIFE, RTX VSR or DLSS5 + Color Lock, export |
+| **Output** | **Stubelius LTX Finish**, **Output** | The finish of the winner: refine (half-size seeds only), final resolution (native up to 4K), final fps through RIFE 4.7 / 4.9 or RTX Frame Generation, RTX VSR, DLSS5 + Color Lock or RelayVSR 2x / 4x, export |
 
 The other nodes: **Stubelius LTX Seeds** renders the seeds at the first-pass scale, with sound;
 **Stubelius LTX Live Preview** shows Seeds and Finish while they sample; **Stubelius LTX RIFE to FPS** and
@@ -74,8 +87,8 @@ Load the workflow and use Manager → **Install Missing Custom Nodes**, or insta
 |---|---|
 | [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) | video outputs |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | live preview, Sage attention and the low-VRAM options |
-| [Nvidia RTX nodes](https://github.com/Comfy-Org/Nvidia_RTX_Nodes_ComfyUI) | RTX VSR upscaling (NVIDIA RTX GPU) |
-| [ComfyUI-Frame-Interpolation](https://github.com/Fannovel16/ComfyUI-Frame-Interpolation) | final fps above the Director's (RIFE) |
+| [Nvidia RTX nodes](https://github.com/Comfy-Org/Nvidia_RTX_Nodes_ComfyUI) | RTX VSR upscaling (NVIDIA RTX GPU) and RTX Frame Generation (its nvidia-vfx 0.2, RTX 40 series and newer) |
+| [ComfyUI-Frame-Interpolation](https://github.com/Fannovel16/ComfyUI-Frame-Interpolation) | final fps above the Director's with RIFE (also the fallback where RTX Frame Generation can't run) |
 | [ComfyUI-DLSS5-Enhancer](https://github.com/Blueforcer/ComfyUI-DLSS5-Enhancer) | DLSS5 upscaler |
 | [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) | GGUF models |
 
@@ -102,9 +115,10 @@ Official files from [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2
 | `models/latent_upscale_models` | [`ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors`](https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors) |
 | `models/vae` | optional live preview: a tiny LTX VAE such as `taeltx2_3.safetensors`, picked as "live preview" on the Models node |
 | `models/loras` | optional, for the Director's Licon MSR reference option: Licon's LTX 2.5 MSR LoRA ([`LTX-2.5-Licon-MSR-V2.safetensors`](https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/resolve/main/LTX-2.5-Licon-MSR-V2.safetensors); V1 also works), picked as "msr lora" on the Models node. The LTX 2.3 MSR LoRAs don't work on 2.5 |
+| `models/diffusion_models` + `models/vae` | optional, for the RelayVSR upscalers (ComfyUI 0.45+), from [Comfy-Org/RelayVSR](https://huggingface.co/Comfy-Org/RelayVSR): 2x = `relayvsr_x2_lightx2v_int8_convrot.safetensors` (5.2 GB) + `relayvsr_flash_vae_x2_fp32.safetensors` (0.13 GB); 4x = `relayvsr_x4_int8_convrot.safetensors` + `relayvsr_flash_vae_x4_fp32.safetensors`. The model and the decoder must be of the same factor |
 
-2.5 needs the Gemma 4 text encoder and will not load a 2.3 one. RIFE downloads its checkpoint the
-first time a final fps above the Director's is used.
+2.5 needs the Gemma 4 text encoder and will not load a 2.3 one. RIFE downloads its checkpoint (4.7 or 4.9)
+the first time a final fps above the Director's is drawn with it.
 
 Developed on an RTX 5090 (32 GB). With less VRAM, turn on the Models node's memory options.
 
