@@ -275,7 +275,8 @@ def _decode_budget(vae, shape, tile_size):
     evicts other models, as for any decode), minus the VRAM reserved for other apps."""
     import comfy.model_management as mm
     device = getattr(vae, "device", None)
-    if getattr(device, "type", "cpu") == "cpu" or mm.is_directml_enabled():
+    # ComfyUI dropped DirectML (and mm.is_directml_enabled) in Nov 2026: no function = not DirectML
+    if getattr(device, "type", "cpu") == "cpu" or getattr(mm, "is_directml_enabled", lambda: False)():
         return None
     try:
         need = _decode_need(vae, shape, WHOLE_CLIP, tile_size)
