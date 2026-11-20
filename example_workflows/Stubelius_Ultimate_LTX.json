@@ -690,6 +690,26 @@
       "name": "upscaler"
      },
      "link": null
+    },
+    {
+     "localized_name": "relayvsr_detail",
+     "name": "relayvsr_detail",
+     "shape": 7,
+     "type": "FLOAT",
+     "widget": {
+      "name": "relayvsr_detail"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "frame_generation",
+     "name": "frame_generation",
+     "shape": 7,
+     "type": "COMBO",
+     "widget": {
+      "name": "frame_generation"
+     },
+     "link": null
     }
    ],
    "outputs": [
@@ -721,7 +741,9 @@
     "keep the seed's audio",
     "1080p",
     0,
-    "RTX VSR"
+    "RTX VSR",
+    1.0,
+    "RTX Frame Gen MEDIUM"
    ],
    "widgets_values_named": {
     "refine_strength": 0.35,
@@ -732,7 +754,9 @@
     "audio": "keep the seed's audio",
     "final_resolution": "1080p",
     "final_fps": 0,
-    "upscaler": "RTX VSR"
+    "upscaler": "RTX VSR",
+    "relayvsr_detail": 1.0,
+    "frame_generation": "RTX Frame Gen MEDIUM"
    },
    "color": "#241e2a",
    "bgcolor": "#1b1720"
